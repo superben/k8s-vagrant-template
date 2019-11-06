@@ -4,8 +4,9 @@
 
   vars:
     proxy_env:
-      http_proxy: http://10.200.10.1:1087
-      https_proxy: http://10.200.10.1:1087
+      http_proxy: http://10.200.10.1:8118
+      https_proxy: http://10.200.10.1:8118
+      no_proxy: localhost,127.0.0.0/8,10.0.0.0/8,192.168.0.0/16,172.16.0.0/12,*.local
     docker_version: 18.06.2.ce
 
   tasks:
@@ -78,7 +79,8 @@
           "storage-driver": "overlay2",
           "storage-opts": [
             "overlay2.override_kernel_check=true"
-          ]
+          ],
+          "insecure-registries" : ["10.200.10.1:5000"]
         }
 
   - name: create path for docker proxy.conf 
@@ -91,7 +93,7 @@
       dest: "/etc/systemd/system/docker.service.d/http-proxy.conf"
       content: |
         [Service]
-        Environment="http_proxy=http://10.200.10.1:1087" "https_proxy=http://10.200.10.1:1087"
+        Environment="http_proxy=http://10.200.10.1:8118" "https_proxy=http://10.200.10.1:8118" "no_proxy=localhost,127.0.0.0/8,10.0.0.0/8,192.168.0.0/16,172.16.0.0/12,*.local"
 
   - name: Enable and check Docker service
     systemd:
@@ -166,7 +168,10 @@
     shell: setenforce 0
 
   - name: sed -i 's/^SELINUX=enforcing$/SELINUX=permissive/' /etc/selinux/config
-    shell: sed -i 's/^SELINUX=enforcing$/SELINUX=permissive/' /etc/selinux/config
+    lineinfile:
+      path: /etc/selinux/config
+      regexp: '^SELINUX=enforcing$'
+      line: 'SELINUX=permissive'
 
   - name: Install kubernetes packages (RHEL/CentOS)
     when: ansible_os_family == "RedHat"
@@ -178,9 +183,7 @@
       update_cache: yes
       disable_excludes: kubernetes
       state: present
-    environment:
-      http_proxy: http://10.200.10.1:1087
-      https_proxy: http://10.200.10.1:1087
+    environment: "{{ proxy_env }}"
 
   - name: Enable and check kubelet service
     when: ansible_os_family == "RedHat"
@@ -189,12 +192,6 @@
       daemon_reload: yes
       state: started
       enabled: yes
-
-  # - name: Configure node ip
-  #   lineinfile:
-  #     path: /etc/default/kubelet
-  #     line: KUBELET_EXTRA_ARGS=--node-ip={{ node_ip }}
-  #     create: yes
 
   - name: Configure node ip
     copy:
