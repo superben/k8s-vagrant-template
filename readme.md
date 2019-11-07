@@ -5,6 +5,14 @@ This vagrant template is to setup Kubenetes enviroment with Vagrant and Virtualb
 
 ##Steps##
 
+###Step 1###
+
+* Specify the version for your Kubenetes. 
+  See k8s_version in ./kubernetes-setup/master-playbook.yml and ./kubernetes-setup/node-playbook.yml.
+
+
+###Step 2###
+
 ```
 # install vagrant-hostmanager first 
 vagrant plugin install vagrant-hostmanager
@@ -19,6 +27,11 @@ vagrant hostmanager
 scp vagrant@192.168.50.10:/home/vagrant/.kube/config ./admin.conf
 
 ```
+
+###Step 3###
+
+scp vagrant@192.168.50.10:/home/vagrant/.kube/config ./admin.conf
+
 
 ##Drawback##
 
