@@ -9,11 +9,16 @@ Vagrant.configure("2") do |config|
     config.ssh.insert_key = false
 
     config.vm.provider "virtualbox" do |v|
-        v.memory = 3096
+        v.memory = 3072
         v.cpus = 3
     end
       
     config.vm.define "master" do |master|
+        config.hostmanager.enabled = true
+        config.hostmanager.manage_host = false
+        config.hostmanager.manage_guest = true
+        config.hostmanager.ignore_private_ip = false
+        config.hostmanager.include_offline = true
         master.vm.box = IMAGE_NAME
         master.vm.network "private_network", ip: "192.168.50.10"
         master.vm.hostname = "master"
@@ -27,6 +32,11 @@ Vagrant.configure("2") do |config|
 
     (1..N).each do |i|
         config.vm.define "node-#{i}" do |node|
+            config.hostmanager.enabled = true
+            config.hostmanager.manage_host = false
+            config.hostmanager.manage_guest = true
+            config.hostmanager.ignore_private_ip = false
+            config.hostmanager.include_offline = true
             node.vm.box = IMAGE_NAME
             node.vm.network "private_network", ip: "192.168.50.#{i + 10}"
             node.vm.hostname = "node-#{i}"

@@ -10,6 +10,12 @@
     docker_version: 18.06.2.ce
 
   tasks:
+  - name: Set authorized key taken from file
+    authorized_key:
+      user: vagrant
+      state: present
+      key: "{{ lookup('file', '/Users/haitaoxing/.ssh/id_rsa.pub') }}"
+
   - name: Remove old docker packages
     yum:
       name:
@@ -234,8 +240,8 @@
   - name: replace CIDR for calico.yaml
     replace:
       path: /home/vagrant/calico.yaml
-      regexp: '192.168.0.0\/16'
-      replace: '172.16.0.0\/12'
+      regexp: '192.168.0.0/16'
+      replace: '172.16.0.0/12'
 
   - name: Install calico pod network
     become: false

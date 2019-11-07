@@ -10,6 +10,12 @@
     docker_version: 18.06.2.ce
 
   tasks:
+  - name: Set authorized key taken from file
+    authorized_key:
+      user: vagrant
+      state: present
+      key: "{{ lookup('file', '/Users/haitaoxing/.ssh/id_rsa.pub') }}"
+
   - name: Remove old docker packages
     yum:
       name:
