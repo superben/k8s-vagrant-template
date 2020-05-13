@@ -7,17 +7,15 @@
       http_proxy: http://10.200.10.1:8118
       https_proxy: http://10.200.10.1:8118
       no_proxy: localhost,127.0.0.0/8,10.0.0.0/8,192.168.0.0/16,172.16.0.0/12,*.local
-    docker_version: 18.06.2.ce
+    
+    # Not used yet
+    docker_version: 18.09.9.ce
+    
     # https://stackoverflow.com/questions/49721708/how-to-install-specific-version-of-kubernetes
     # curl -s https://packages.cloud.google.com/apt/dists/kubernetes-xenial/main/binary-amd64/Packages | grep Version | awk '{print $2}'
-    k8s_version: 1.15.5-0
+    k8s_version: 1.16.9-0
 
   tasks:
-  - name: Set authorized key taken from file
-    authorized_key:
-      user: vagrant
-      state: present
-      key: "{{ lookup('file', '/Users/haitaoxing/.ssh/id_rsa.pub') }}"
 
   - name: Remove old docker packages
     yum:
@@ -222,12 +220,16 @@
     file:
       path: /home/vagrant/.kube
       state: directory
+      owner: vagrant
+      group: vagrant
 
   - name: Setup kubeconfig for vagrant user
-    command: "{{ item }}"
-    with_items:
-      - cp -i /etc/kubernetes/admin.conf /home/vagrant/.kube/config
-      - chown vagrant:vagrant /home/vagrant/.kube/config
+    copy:
+      src: /etc/kubernetes/admin.conf
+      dest: /home/vagrant/.kube/config
+      remote_src: yes
+      owner: vagrant
+      group: vagrant
 
   - name: download calico.yaml
     get_url: 
@@ -238,7 +240,7 @@
     file:
       path: /home/vagrant/calico.yaml
       owner: vagrant
-      group: vagrant      
+      group: vagrant
 
   - name: replace CIDR for calico.yaml
     replace:
@@ -256,6 +258,15 @@
 
   - name: Copy join command to local file
     local_action: copy content="{{ join_command.stdout_lines[0] }}" dest="./join-command"
+
+  - debug:
+      msg: "export KUBECONFIG={{ playbook_dir }}/admin.conf"
+
+  - name: fetch admin.conf to local
+    fetch:
+      src: /etc/kubernetes/admin.conf
+      dest: "{{ playbook_dir }}/admin.conf"
+      flat: yes
 
   handlers:
     - name: docker status

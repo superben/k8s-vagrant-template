@@ -6,7 +6,17 @@ IMAGE_NAME = "geerlingguy/centos7"
 N = 2
 
 Vagrant.configure("2") do |config|
-    config.ssh.insert_key = false
+    # https://medium.com/@Sohjiro/add-public-key-to-vagrant-4bd5424521bf
+    config.ssh.insert_key = false # 1
+    config.ssh.private_key_path = ['~/.vagrant.d/insecure_private_key', '~/.ssh/id_rsa'] # 2
+    config.vm.provision "file", source: "~/.ssh/id_rsa.pub", destination: "~/.ssh/authorized_keys" # 3
+
+    # 4
+    config.vm.provision "shell", inline: <<-EOC
+      sudo sed -i -e "\\#PasswordAuthentication yes# s#PasswordAuthentication yes#PasswordAuthentication no#g" /etc/ssh/sshd_config
+      sudo systemctl restart sshd.service
+      echo "finished"
+    EOC
 
     config.vm.provider "virtualbox" do |v|
         v.memory = 3072
