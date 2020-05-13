@@ -26,12 +26,18 @@ vagrant hostmanager
 # make ready for kubectl
 scp vagrant@192.168.50.10:/home/vagrant/.kube/config ./admin.conf
 
+# how to test tasks
+ansible-playbook -i hosts  kubernetes-setup/test-playbook.yml
+
 ```
 
 ###Step 3###
 
-scp vagrant@192.168.50.10:/home/vagrant/.kube/config ./admin.conf
+```
+export KUBECONFIG=/Users/haitaoxing/workspaces/k8t/kubernetes-setup/admin.conf
 
+kubens
+```
 
 ##Drawback##
 
