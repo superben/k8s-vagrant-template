@@ -202,7 +202,7 @@
 
   - name: Configure node ip
     copy:
-      dest: "/etc/default/kubelet"
+      dest: "/etc/sysconfig/kubelet"
       content: |
         [Service]
         KUBELET_EXTRA_ARGS=--node-ip={{ node_ip }}
