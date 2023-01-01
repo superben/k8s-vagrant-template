@@ -3,133 +3,116 @@
   become: true
 
   vars:
+    # 
+    # https://microk8s.io/docs/install-proxy
+    # https://github.com/containerd/containerd/issues/1990
+    #
     proxy_env:
-      http_proxy: http://10.200.10.1:8118
-      https_proxy: http://10.200.10.1:8118
-      no_proxy: localhost,127.0.0.0/8,10.0.0.0/8,192.168.0.0/16,172.16.0.0/12,*.local
-    
-    # Not used yet
-    docker_version: 18.09.9.ce
+      http_proxy: http://10.200.10.1:1087
+      https_proxy: http://10.200.10.1:1087
+      no_proxy: localhost,127.0.0.1,10.200.10.1,10.0.0.10,master,10.0.0.11,node-1,10.0.0.12,node-2,10.96.0.0/12,10.0.2.15,192.168.0.0/16
     
     # https://stackoverflow.com/questions/49721708/how-to-install-specific-version-of-kubernetes
     # curl -s https://packages.cloud.google.com/apt/dists/kubernetes-xenial/main/binary-amd64/Packages | grep Version | awk '{print $2}'
-    k8s_version: 1.16.9-0
+    # 注意: 不能是 1.21.30-00的形式
+    # https://kubernetes.io/releases/
+    #
+    # Changed？
+    # https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/configure-cgroup-driver/
+    #
+    #
+    k8s_version: v1.25.5
+    kubelet_version: 1.25.5-00
 
   tasks:
 
-  - name: Remove old docker packages
-    yum:
-      name:
-        - docker
-        - docker-client
-        - docker-client-latest
-        - docker-common
-        - docker-latest
-        - docker-latest-logrotate
-        - docker-logrotate
-        - docker-engine
+  - name: add line of registry.local to /etc/hosts
+    lineinfile:
+      path: /etc/hosts
+      line: 10.200.10.1 registry.local
+      owner: root
+      group: root
+      mode: '0644'
+
+  # setup proxy 
+  # see: https://microk8s.io/docs/install-proxy
+  #
+  - name: Setup proxy in /etc/environment file
+    ansible.builtin.blockinfile:
+      path: /etc/environment
+      block: |
+        HTTP_PROXY={{ proxy_env.http_proxy }}
+        HTTPS_PROXY={{ proxy_env.https_proxy }}
+        NO_PROXY={{ proxy_env.no_proxy }}
+
+  # see https://www.howtoforge.com/how-to-setup-apt-proxy-on-ubuntu/
+  - name: Setup proxy in /etc/apt/apt.conf.d/proxy.conf file for apt-get
+    ansible.builtin.blockinfile:
+      path: /etc/apt/apt.conf.d/proxy.conf
+      block: |
+        Acquire::http::Proxy "{{ proxy_env.http_proxy }}";
+        Acquire::https::Proxy "{{ proxy_env.https_proxy }}";
+      create: yes
+
+  # - name: Copy local tools to remote host
+  #   ansible.builtin.copy:
+  #     src: ./shared-data/nerdctl-1.0.0-linux-amd64.tar.gz
+  #     dest: /home/vagrant/
+  #     owner: vagrant
+  #     group: vagrant
+  #     mode: '0644'
+
+  - name: backup /etc/apt/sources.list
+    ansible.builtin.command: 
+      cmd: mv /etc/apt/sources.list /etc/apt/sources.list~
+
+  - name: Remove /etc/apt/sources.list
+    ansible.builtin.file:
+      path: /etc/apt/sources.list
       state: absent
 
-  - name: Install packages that allow yum to be used over HTTPS
-    yum:
-      name: "{{ packages }}"
-      state: present
-      update_cache: yes
-    vars:
-      packages:
-      - yum-utils
-      - device-mapper-persistent-data
-      - lvm2
-      - screen
+  # TODO: use indepedent list would be better like docker does.
+  - name: adds /etc/apt/sources.list.d/mirrors-cn.list
+    ansible.builtin.blockinfile:
+      path: /etc/apt/sources.list
+      block: |
+        deb https://mirrors.ustc.edu.cn/ubuntu/ jammy main restricted universe multiverse
+        deb-src https://mirrors.ustc.edu.cn/ubuntu/ jammy main restricted universe multiverse
+        deb https://mirrors.ustc.edu.cn/ubuntu/ jammy-updates main restricted universe multiverse
+        deb-src https://mirrors.ustc.edu.cn/ubuntu/ jammy-updates main restricted universe multiverse
+        deb https://mirrors.ustc.edu.cn/ubuntu/ jammy-backports main restricted universe multiverse
+        deb-src https://mirrors.ustc.edu.cn/ubuntu/ jammy-backports main restricted universe multiverse
+        deb https://mirrors.ustc.edu.cn/ubuntu/ jammy-security main restricted universe multiverse
+        deb-src https://mirrors.ustc.edu.cn/ubuntu/ jammy-security main restricted universe multiverse
+        deb https://mirrors.ustc.edu.cn/ubuntu/ jammy-proposed main restricted universe multiverse
+        deb-src https://mirrors.ustc.edu.cn/ubuntu/ jammy-proposed main restricted universe multiverse
+      create: yes
 
-  - name: Add docker yum repository
-    yum_repository:
-      name: Docker
-      description: Docker Repository
-      file: docker
-      baseurl: https://download.docker.com/linux/centos/7/x86_64/stable
-      enabled: yes
-      gpgcheck: yes
-      gpgkey: https://download.docker.com/linux/centos/gpg
-
-  - name: Install docker and its dependecies
-    yum: 
-      name: "{{ packages }}"
-      state: present
-    vars:
-      packages:
-      - docker-ce
-      - docker-ce-cli
-      - containerd.io
-
-  # - name: Add vagrant user to docker group
-  #   user:
-  #     name: vagrant
-  #     group: docker
-
-  # https://kubernetes.io/docs/setup/production-environment/container-runtimes/#docker
-  - name: Create /etc/docker directory
-    file:
-      path: "/etc/docker"
-      state: directory
-
-  - name: Setup daemon
-    copy:
-      dest: "/etc/docker/daemon.json"
-      content: |
-        {
-          "exec-opts": ["native.cgroupdriver=systemd"],
-          "log-driver": "json-file",
-          "log-opts": {
-            "max-size": "100m"
-          },
-          "storage-driver": "overlay2",
-          "storage-opts": [
-            "overlay2.override_kernel_check=true"
-          ],
-          "insecure-registries" : ["10.200.10.1:5000"]
-        }
-
-  - name: create path for docker proxy.conf 
-    file:
-      path: "/etc/systemd/system/docker.service.d"
-      state: directory
-
-  - name: create proxy.conf for docker
-    copy:
-      dest: "/etc/systemd/system/docker.service.d/http-proxy.conf"
-      content: |
-        [Service]
-        Environment="http_proxy=http://10.200.10.1:8118" "https_proxy=http://10.200.10.1:8118" "no_proxy=localhost,127.0.0.0/8,10.0.0.0/8,192.168.0.0/16,172.16.0.0/12,*.local"
-
-  - name: Enable and check Docker service
-    systemd:
-      name: docker
-      daemon_reload: yes
-      state: started
-      enabled: yes
-
+  # install containerd 
+  # TODO:
   - name: Remove swapfile from /etc/fstab
-    mount:
-      name: swap
-      fstype: swap
-      state: absent
+    ansible.builtin.command: 
+      cmd: sed -i 's/^\/swap/#\/swap/' /etc/fstab
 
+  # TODO: 
   - name: Disable swap
     command: swapoff -a
     when: ansible_swaptotal_mb > 0
 
-  - name: Set selinux policy to permissive
-    selinux:
-      policy: targeted
-      state: permissive
-    when:
-      - ansible_os_family == "RedHat"
+  # 2022.11.23 
+  # https://kubernetes.io/docs/setup/production-environment/container-runtimes/
+  - name: Add overlay & br_netfilter in /etc/modules-load.d/k8s.conf
+    ansible.builtin.blockinfile:
+      path: /etc/modules-load.d/k8s.conf
+      block: |
+        overlay
+        br_netfilter
+      create: yes
 
-  - name: Add br_netfilter in /etc/modules-load.d/
-    copy:
-      dest: /etc/modules-load.d/br_netfilter.conf
-      content: br_netfilter
+  - name: Load the overlay module
+    modprobe:
+      name: overlay
+      state: present
 
   - name: Load the br_netfilter module
     modprobe:
@@ -139,82 +122,290 @@
   - name: Write bridge-netfilter and ip-forward system variables
     copy:
       content: |
-        net.ipv4.ip_forward=1
-        net.bridge.bridge-nf-call-ip6tables=1
-        net.bridge.bridge-nf-call-iptables=1
+        net.bridge.bridge-nf-call-ip6tables = 1
+        net.bridge.bridge-nf-call-iptables  = 1
+        net.ipv4.ip_forward                 = 1
       dest: /etc/sysctl.d/k8s.conf
+      # mode: '666'
 
-  - name: Enable bridge-netfilter and ip-forward system variables
-    sysctl:
-      name: "{{ item.name }}"
-      value: "{{ item.value }}"
-    with_items:
-      - name: vm.swappiness
-        value: 0
-      - name: net.ipv4.ip_forward
-        value: 1
-      - name: net.bridge.bridge-nf-call-ip6tables
-        value: 1
-      - name: net.bridge.bridge-nf-call-iptables
-        value: 1
-
-  - name: Add Kubernetes yum repository
-    when: ansible_os_family == "RedHat"
-    yum_repository:
-      name: kubernetes
-      description: Kubernetes Repository
-      file: kubernetes
-      baseurl: https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
-      enabled: yes
-      gpgcheck: yes
-      repo_gpgcheck: yes
-      gpgkey: https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
-      exclude: kube*
-
-  - name: setenforce 0
-    shell: setenforce 0
-
-  - name: sed -i 's/^SELINUX=enforcing$/SELINUX=permissive/' /etc/selinux/config
-    lineinfile:
-      path: /etc/selinux/config
-      regexp: '^SELINUX=enforcing$'
-      line: 'SELINUX=permissive'
-
-  - name: Install kubernetes packages (RHEL/CentOS)
-    when: ansible_os_family == "RedHat"
-    yum:
-      name:
-        - kubelet-{{ k8s_version }}
-        - kubeadm-{{ k8s_version }}
-        - kubectl-{{ k8s_version }}
-      update_cache: yes
-      disable_excludes: kubernetes
+  - name: Set ip forwarding on in /proc and in the sysctl file and reload if necessary
+    ansible.posix.sysctl:
+      name: net.ipv4.ip_forward
+      value: '1'
+      sysctl_set: yes
       state: present
-    environment: "{{ proxy_env }}"
+      reload: yes
 
-  - name: Enable and check kubelet service
-    when: ansible_os_family == "RedHat"
-    systemd:
-      name: kubelet
-      daemon_reload: yes
-      state: started
+  - name: Set net.bridge.bridge-nf-call-ip6tables to 1 in the sysctl file and reload if necessary
+    ansible.posix.sysctl:
+      name: net.bridge.bridge-nf-call-ip6tables
+      value: '1'
+      sysctl_set: yes
+      state: present
+      reload: yes
+
+  - name: Set net.bridge.bridge-nf-call-iptables to 1 in the sysctl file and reload if necessary
+    ansible.posix.sysctl:
+      name: net.bridge.bridge-nf-call-iptables
+      value: '1'
+      sysctl_set: yes
+      state: present
+      reload: yes
+
+  # https://kubernetes.io/docs/setup/production-environment/container-runtimes/#containerd
+  # https://github.com/containerd/containerd/blob/main/docs/getting-started.md
+  # Option 2: From apt-get or dnf, https://docs.docker.com/engine/install/ubuntu/
+  - name: Uninstall old versions of 
+    ansible.builtin.apt:
+      pkg:
+      - docker
+      - docker-engine
+      - docker.io
+      - containerd
+      - runc
+      state: absent
+
+  # https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/install-kubeadm/
+  - name: Run "apt-get update"
+    ansible.builtin.apt:
+      update_cache: yes
+
+  - name: Install packages of apt-transport-https, ca-certificates and curl
+    ansible.builtin.apt:
+      pkg:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+      - screen
+
+  - name: Create a directory if /etc/apt/keyrings does not exist
+    ansible.builtin.file:
+      path: /etc/apt/keyrings
+      state: directory
+      # mode: '0755'
+
+  # Ignored apt-get update && apt-get install gnupg & lsb-release here as already done. 
+  #
+  - name: Add Docker’s official GPG key
+    ansible.builtin.shell: |
+      curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+
+  - name: Set up the Docker repository
+    ansible.builtin.shell: |
+      echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list
+
+  - name: Run "apt-get update"
+    ansible.builtin.apt:
+      update_cache: yes
+
+  - name: To install the latest version of containerd
+    ansible.builtin.apt:
+      pkg:
+      - containerd.io
+
+  - name: Create a directory if /etc/containerd does not exist
+    ansible.builtin.file:
+      path: /etc/containerd
+      state: directory
+
+  # Good!
+  # https://www.nocentino.com/posts/2021-12-27-installing-and-configuring-containerd-as-a-kubernetes-container-runtime/
+  # 
+  # https://github.com/containerd/cri/blob/master/docs/config.md
+  # https://github.com/containerd/containerd/blob/main/docs/ops.md
+  # https://github.com/opencontainers/runc/blob/main/docs/systemd.md
+  # https://frasertweedale.github.io/blog-redhat/posts/2021-05-27-oci-runtime-spec-runc.html
+  # 
+  # Original method
+  # - name: Configure containerd and start service
+  #   ansible.builtin.shell: |
+  #     containerd config default | tee /etc/containerd/config.toml
+  #     sed -i 's/            SystemdCgroup = false/            SystemdCgroup = true/' /etc/containerd/config.toml
+  # 
+  # Adding insecure registry in containerd
+  # 
+  # https://github.com/containerd/containerd/blob/main/docs/cri/registry.md
+  # https://github.com/containerd/containerd/blob/main/docs/hosts.md
+  #
+  # 最有用的
+  # https://github.com/containerd/cri/blob/master/docs/registry.md#configure-registry-tls-communication
+  # 
+  # Good!
+  # https://kubernetesquestions.com/questions/65681045
+  # TODO: 先安装kubectl or crictl，然后再试
+  # 
+  # Too old!
+  # https://github.com/containerd/containerd/issues/3847
+  # 
+  # TODO:
+  # https://mrzik.medium.com/how-to-configure-private-registry-for-kubernetes-cluster-running-with-containerd-cf74697fa382
+  # 
+  # nerdctl pull 10.200.10.1:5000/demo/demo:v0.1
+  # crictl pull 10.200.10.1:5000/demo/demo:v0.1
+  # ctr i pull --plain-http   10.200.10.1:5000/demo/demo:v0.1
+  # 
+  # 注意：1. 只能用crictl， nerdctl & ctr 不好使. 2. NO_PROXY 过滤掉10.200.10.1
+  # crictl info 
+  # 
+  ## /etc/containerd/config.toml
+  # [plugins."io.containerd.grpc.v1.cri".registry.configs]
+  #   [plugins."io.containerd.grpc.v1.cri".registry.configs."10.200.10.1:5000".tls]
+  #     insecure_skip_verify = true
+  # 
+  # [plugins."io.containerd.grpc.v1.cri".registry.headers]
+  # 
+  # [plugins."io.containerd.grpc.v1.cri".registry.mirrors]
+  #   [plugins."io.containerd.grpc.v1.cri".registry.mirrors."10.200.10.1:5000"]
+  #     endpoint = ["http://10.200.10.1:5000"]
+  # 
+  #  Just copy good config.toml
+  - name: Copy local config.toml to remote host
+    ansible.builtin.copy:
+      src: ./shared-data/config.toml
+      dest: /etc/containerd/config.toml
+  
+  # 
+  # see: https://github.com/kubernetes/kubeadm/issues/182
+  #
+  # systemctl set-environment HTTP_PROXY=10.200.10.1:1087
+  # systemctl set-environment HTTPS_PROXY=10.200.10.1:1087
+  # systemctl set-environment NO_PROXY=127.0.0.1,localhost,10.200.10.1,10.0.0.10,master
+  # systemctl show-environment
+  # systemctl restart containerd.service
+  # 
+  - name: Setup proxy for kubeadm
+    ansible.builtin.shell: |
+      systemctl set-environment HTTP_PROXY={{ proxy_env.http_proxy }}
+      systemctl set-environment HTTPS_PROXY={{ proxy_env.https_proxy }}
+      systemctl set-environment NO_PROXY={{ proxy_env.no_proxy }}
+
+  - name: Reload service containerd, in all cases
+    ansible.builtin.systemd:
+      name: containerd
+      state: restarted
       enabled: yes
 
-  - name: Configure node ip
-    copy:
-      dest: "/etc/sysconfig/kubelet"
-      content: |
-        [Service]
-        KUBELET_EXTRA_ARGS=--node-ip={{ node_ip }}
+  - name: Download the Google Cloud public signing key
+    ansible.builtin.shell: |
+      curl -fsSLo /usr/share/keyrings/kubernetes-archive-keyring.gpg https://packages.cloud.google.com/apt/doc/apt-key.gpg  
 
-  - name: Restart kubelet
-    systemd:
+  - name: Add the Kubernetes apt repository
+    ansible.builtin.shell: |
+      echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | tee /etc/apt/sources.list.d/kubernetes.list
+
+  - name: Run the equivalent of "apt-get update" as a separate step
+    ansible.builtin.apt:
+      update_cache: yes
+
+  - name: Install packages of kubelet, kubeadm and kubectl
+    ansible.builtin.apt:
+      pkg:
+      - kubelet={{ kubelet_version }}
+      - kubeadm={{ kubelet_version }}
+      - kubectl={{ kubelet_version }}
+      allow_change_held_packages: true
+  
+  # https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/kubelet-integration/
+  # https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/configure-cgroup-driver/
+  # https://kubernetes.io/docs/tasks/administer-cluster/kubelet-config-file/
+  # 
+  # https://kubernetes.io/docs/reference/config-api/kubelet-config.v1beta1/
+  # 
+  # https://kubernetes.io/docs/reference/setup-tools/kubeadm/kubeadm-config/
+  # comamnd: kubeadm config print init-defaults
+  # 
+  # kubeadm config images list
+  # registry.k8s.io/kube-apiserver:v1.25.4
+  # registry.k8s.io/kube-controller-manager:v1.25.4
+  # registry.k8s.io/kube-scheduler:v1.25.4
+  # registry.k8s.io/kube-proxy:v1.25.4
+  # registry.k8s.io/pause:3.8
+  # registry.k8s.io/etcd:3.5.5-0
+  # registry.k8s.io/coredns/coredns:v1.9.3
+  #
+  - name: Configure /etc/kubernetes/kubeadm-config.yaml 
+    ansible.builtin.blockinfile:
+      path: /etc/kubernetes/kubeadm-config.yaml
+      block: |
+        apiVersion: kubeadm.k8s.io/v1beta3
+        bootstrapTokens:
+        - groups:
+          - system:bootstrappers:kubeadm:default-node-token
+        #  token: abcdef.0123456789abcdef
+          ttl: 24h0m0s
+          usages:
+          - signing
+          - authentication
+        kind: InitConfiguration
+        localAPIEndpoint:
+          advertiseAddress: {{ node_ip }}
+          bindPort: 6443
+        nodeRegistration:
+          criSocket: unix:///var/run/containerd/containerd.sock
+          imagePullPolicy: IfNotPresent
+          name: {{ host_name }}
+          taints: null
+        ---
+        apiServer:
+          timeoutForControlPlane: 4m0s
+        apiVersion: kubeadm.k8s.io/v1beta3
+        certificatesDir: /etc/kubernetes/pki
+        clusterName: haitao-k8s
+        controllerManager: {}
+        dns: {}
+        etcd:
+          local:
+            dataDir: /var/lib/etcd
+        imageRepository: registry.k8s.io
+        kind: ClusterConfiguration
+        kubernetesVersion: {{ k8s_version }}
+        networking:
+          dnsDomain: cluster.local
+          serviceSubnet: 10.96.0.0/12
+          podSubnet: 192.168.0.0/16
+        scheduler: {}
+        ---
+        kind: KubeletConfiguration
+        apiVersion: kubelet.config.k8s.io/v1beta1
+        cgroupDriver: systemd
+      create: yes
+
+  - name: Restart kubelet, in all cases
+    ansible.builtin.systemd:
       name: kubelet
-      daemon_reload: yes
       state: restarted
+      enabled: yes
+      daemon_reload: yes
 
+  # 
+  # 
+  # 
+  - name: kubeadm config images pull
+    ansible.builtin.shell: |
+      #!/bin/sh
+      export HTTP_PROXY={{ proxy_env.http_proxy }}
+      export HTTPS_PROXY={{ proxy_env.https_proxy }}
+      export NO_PROXY={{ proxy_env.no_proxy }}
+      kubeadm config images pull --config=/etc/kubernetes/kubeadm-config.yaml
+
+  #
+  # Run 'kubeadm reset -f' before run 'kubeadm init' again if any problems
+  # Run 'kubeadm init --v=5' for debuging
+  # 
+  # see:
+  #   https://kubernetes.io/docs/reference/setup-tools/kubeadm/
+  #   https://kubernetes.io/docs/reference/setup-tools/kubeadm/kubeadm-reset/
+  # 
+  # kubeadm init fails with node not found
+  # https://github.com/kubernetes/kubeadm/issues/2370
+  # 
   - name: Initialize the Kubernetes cluster using kubeadm
-    command: kubeadm init --apiserver-advertise-address="192.168.50.10" --apiserver-cert-extra-sans="192.168.50.10"  --node-name master --pod-network-cidr="172.16.0.0/12"
+    ansible.builtin.shell: |
+      #!/bin/sh
+      # export KUBELET_KUBEADM_ARGS="--apiserver-advertise-address={{ node_ip }} --apiserver-cert-extra-sans={{ node_ip }} --node-name={{ host_name }} --pod-network-cidr=172.16.0.0/12"
+      kubeadm init --config=/etc/kubernetes/kubeadm-config.yaml
 
   - name: create /home/vagrant/.kube for vagrant user
     file:
@@ -224,43 +415,54 @@
       group: vagrant
 
   - name: Setup kubeconfig for vagrant user
-    copy:
+    ansible.builtin.copy:
       src: /etc/kubernetes/admin.conf
       dest: /home/vagrant/.kube/config
       remote_src: yes
       owner: vagrant
       group: vagrant
+      mode: '666'
 
-  - name: download calico.yaml
+  - name: Copy /etc/kubernetes/admin.conf from remote to local.
+    fetch:
+     src: /etc/kubernetes/admin.conf
+     dest: .
+  
+  # https://docs.projectcalico.org/getting-started/kubernetes/quickstart
+  - name: download custom-resources.yaml
     get_url: 
-      url: https://docs.projectcalico.org/v3.9/manifests/calico.yaml
-      dest: /home/vagrant/calico.yaml
+      url: https://raw.githubusercontent.com/projectcalico/calico/v3.24.5/manifests/custom-resources.yaml
+      dest: /home/vagrant/custom-resources.yaml
+      validate_certs: no
+      mode: '666'
 
-  - name: change owner of calico.yaml to vagrant user
+  - name: change owner of custom-resources.yaml to vagrant user
     file:
-      path: /home/vagrant/calico.yaml
+      path: /home/vagrant/custom-resources.yaml
       owner: vagrant
       group: vagrant
+      mode: '666'
 
-  - name: replace CIDR for calico.yaml
-    replace:
-      path: /home/vagrant/calico.yaml
-      regexp: '192.168.0.0/16'
-      replace: '172.16.0.0/12'
-
-  - name: Install calico pod network
+  - name: Install the Tigera Calico operator
     become: false
-    command: kubectl create -f /home/vagrant/calico.yaml
+    command: kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.24.5/manifests/tigera-operator.yaml
+
+
+  - name: Install Calico by creating the necessary custom resource
+    become: false
+    command: kubectl create -f /home/vagrant/custom-resources.yaml
 
   - name: Generate join command
     command: kubeadm token create --print-join-command
     register: join_command
 
   - name: Copy join command to local file
+    become: false
     local_action: copy content="{{ join_command.stdout_lines[0] }}" dest="./join-command"
 
   - debug:
-      msg: "export KUBECONFIG={{ playbook_dir }}/admin.conf"
+      # msg: "export KUBECONFIG={{ playbook_dir }}/admin.conf"
+      msg: "ln -sf {{ playbook_dir }}/admin.conf ~/.kube/config"
 
   - name: fetch admin.conf to local
     fetch:
@@ -268,6 +470,14 @@
       dest: "{{ playbook_dir }}/admin.conf"
       flat: yes
 
+  # just check ansible_swaptotal_mb
+  # https://docs.ansible.com/ansible/latest/playbook_guide/playbooks_vars_facts.html
+  # - name: Print all available facts
+  #   ansible.builtin.debug:
+  #     var: ansible_facts
+
+  # kubectl cluster-info [dump]
+  # 
   handlers:
-    - name: docker status
-      service: name=docker state=started
+    - name: containerd status
+      service: name=containerd state=started

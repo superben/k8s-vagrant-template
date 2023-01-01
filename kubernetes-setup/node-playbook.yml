@@ -4,129 +4,68 @@
 
   vars:
     proxy_env:
-      http_proxy: http://10.200.10.1:8118
-      https_proxy: http://10.200.10.1:8118
-      no_proxy: localhost,127.0.0.0/8,10.0.0.0/8,192.168.0.0/16,172.16.0.0/12,*.local
+      http_proxy: http://10.200.10.1:1087
+      https_proxy: http://10.200.10.1:1087
+      no_proxy: localhost,127.0.0.1,10.200.10.1,10.0.0.10,master,10.0.0.11,node-1,10.0.0.12,node-2,10.96.0.0/12,10.0.2.15,192.168.0.0/16
     
-    # Not used yet
-    docker_version: 18.09.9.ce
-    k8s_version: 1.16.9-0
+    kubelet_version: 1.25.5-00
 
   tasks:
 
-  - name: Remove old docker packages
-    yum:
-      name:
-        - docker
-        - docker-client
-        - docker-client-latest
-        - docker-common
-        - docker-latest
-        - docker-latest-logrotate
-        - docker-logrotate
-        - docker-engine
-      state: absent
+  - name: add line of registry.local to /etc/hosts
+    lineinfile:
+      path: /etc/hosts
+      line: 10.200.10.1 registry.local
+      owner: root
+      group: root
+      mode: '0644'
 
-  - name: Install packages that allow yum to be used over HTTPS
-    yum:
-      name: "{{ packages }}"
-      state: present
-      update_cache: yes
-    vars:
-      packages:
-      - yum-utils
-      - device-mapper-persistent-data
-      - lvm2
-      - screen
+  - name: Setup proxy in /etc/environment file
+    ansible.builtin.blockinfile:
+      path: /etc/environment
+      block: |
+        HTTP_PROXY={{ proxy_env.http_proxy }}
+        HTTPS_PROXY={{ proxy_env.https_proxy }}
+        NO_PROXY={{ proxy_env.no_proxy }}
 
-  - name: Add docker yum repository
-    yum_repository:
-      name: Docker
-      description: Docker Repository
-      file: docker
-      baseurl: https://download.docker.com/linux/centos/7/x86_64/stable
-      enabled: yes
-      gpgcheck: yes
-      gpgkey: https://download.docker.com/linux/centos/gpg
+  - name: Setup proxy in /etc/apt/apt.conf.d/proxy.conf file for apt-get
+    ansible.builtin.blockinfile:
+      path: /etc/apt/apt.conf.d/proxy.conf
+      block: |
+        Acquire::http::Proxy "{{ proxy_env.http_proxy }}";
+        Acquire::https::Proxy "{{ proxy_env.https_proxy }}";
+      create: yes
 
-  - name: Install docker and its dependecies
-    yum: 
-      name: "{{ packages }}"
-      state: present
-    vars:
-      packages:
-      - docker-ce
-      - docker-ce-cli
-      - containerd.io
+  # - name: Copy local tools to remote host
+  #   ansible.builtin.copy:
+  #     src: ./shared-data/nerdctl-1.0.0-linux-amd64.tar.gz
+  #     dest: /home/vagrant/
+  #     owner: vagrant
+  #     group: vagrant
+  #     mode: '0644'
 
-  # - name: Add vagrant user to docker group
-  #   user:
-  #     name: vagrant
-  #     group: docker
-
-  # https://kubernetes.io/docs/setup/production-environment/container-runtimes/#docker
-  - name: Create /etc/docker directory
-    file:
-      path: "/etc/docker"
-      state: directory
-
-  - name: Setup daemon
-    copy:
-      dest: "/etc/docker/daemon.json"
-      content: |
-        {
-          "exec-opts": ["native.cgroupdriver=systemd"],
-          "log-driver": "json-file",
-          "log-opts": {
-            "max-size": "100m"
-          },
-          "storage-driver": "overlay2",
-          "storage-opts": [
-            "overlay2.override_kernel_check=true"
-          ],
-          "insecure-registries" : ["10.200.10.1:5000"]
-        }
-
-  - name: create path for docker proxy.conf 
-    file:
-      path: "/etc/systemd/system/docker.service.d"
-      state: directory
-
-  - name: create proxy.conf for docker
-    copy:
-      dest: "/etc/systemd/system/docker.service.d/http-proxy.conf"
-      content: |
-        [Service]
-        Environment="http_proxy=http://10.200.10.1:8118" "https_proxy=http://10.200.10.1:8118" "no_proxy=localhost,127.0.0.0/8,10.0.0.0/8,192.168.0.0/16,172.16.0.0/12,*.local"
-
-  - name: Enable and check Docker service
-    systemd:
-      name: docker
-      daemon_reload: yes
-      state: started
-      enabled: yes
-
+  # TODO:
   - name: Remove swapfile from /etc/fstab
-    mount:
-      name: swap
-      fstype: swap
-      state: absent
+    ansible.builtin.command: 
+      cmd: sed -i 's/^\/swap/#\/swap/' /etc/fstab
 
+  # TODO: 
   - name: Disable swap
     command: swapoff -a
     when: ansible_swaptotal_mb > 0
 
-  - name: Set selinux policy to permissive
-    selinux:
-      policy: targeted
-      state: permissive
-    when:
-      - ansible_os_family == "RedHat"
+  - name: Add overlay & br_netfilter in /etc/modules-load.d/k8s.conf
+    ansible.builtin.blockinfile:
+      path: /etc/modules-load.d/k8s.conf
+      block: |
+        overlay
+        br_netfilter
+      create: yes
 
-  - name: Add br_netfilter in /etc/modules-load.d/
-    copy:
-      dest: /etc/modules-load.d/br_netfilter.conf
-      content: br_netfilter
+  - name: Load the overlay module
+    modprobe:
+      name: overlay
+      state: present
 
   - name: Load the br_netfilter module
     modprobe:
@@ -136,79 +75,134 @@
   - name: Write bridge-netfilter and ip-forward system variables
     copy:
       content: |
-        net.ipv4.ip_forward=1
-        net.bridge.bridge-nf-call-ip6tables=1
-        net.bridge.bridge-nf-call-iptables=1
+        net.bridge.bridge-nf-call-ip6tables = 1
+        net.bridge.bridge-nf-call-iptables  = 1
+        net.ipv4.ip_forward                 = 1
       dest: /etc/sysctl.d/k8s.conf
+      # mode: '666'
 
-  - name: Enable bridge-netfilter and ip-forward system variables
-    sysctl:
-      name: "{{ item.name }}"
-      value: "{{ item.value }}"
-    with_items:
-      - name: vm.swappiness
-        value: 0
-      - name: net.ipv4.ip_forward
-        value: 1
-      - name: net.bridge.bridge-nf-call-ip6tables
-        value: 1
-      - name: net.bridge.bridge-nf-call-iptables
-        value: 1
-
-  - name: Add Kubernetes yum repository
-    when: ansible_os_family == "RedHat"
-    yum_repository:
-      name: kubernetes
-      description: Kubernetes Repository
-      file: kubernetes
-      baseurl: https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
-      enabled: yes
-      gpgcheck: yes
-      repo_gpgcheck: yes
-      gpgkey: https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
-      exclude: kube*
-
-  - name: setenforce 0
-    shell: setenforce 0
-
-  - name: sed -i 's/^SELINUX=enforcing$/SELINUX=permissive/' /etc/selinux/config
-    lineinfile:
-      path: /etc/selinux/config
-      regexp: '^SELINUX=enforcing$'
-      line: 'SELINUX=permissive'
-
-  - name: Install kubernetes packages (RHEL/CentOS)
-    when: ansible_os_family == "RedHat"
-    yum:
-      name:
-        - kubelet-{{ k8s_version }}
-        - kubeadm-{{ k8s_version }}
-        - kubectl-{{ k8s_version }}
-      update_cache: yes
-      disable_excludes: kubernetes
+  - name: Set ip forwarding on in /proc and in the sysctl file and reload if necessary
+    ansible.posix.sysctl:
+      name: net.ipv4.ip_forward
+      value: '1'
+      sysctl_set: yes
       state: present
-    environment: "{{ proxy_env }}"
+      reload: yes
 
-  - name: Enable and check kubelet service
-    when: ansible_os_family == "RedHat"
-    systemd:
-      name: kubelet
-      daemon_reload: yes
-      state: started
+  - name: Set net.bridge.bridge-nf-call-ip6tables to 1 in the sysctl file and reload if necessary
+    ansible.posix.sysctl:
+      name: net.bridge.bridge-nf-call-ip6tables
+      value: '1'
+      sysctl_set: yes
+      state: present
+      reload: yes
+
+  - name: Set net.bridge.bridge-nf-call-iptables to 1 in the sysctl file and reload if necessary
+    ansible.posix.sysctl:
+      name: net.bridge.bridge-nf-call-iptables
+      value: '1'
+      sysctl_set: yes
+      state: present
+      reload: yes
+
+  - name: Uninstall old versions of 
+    ansible.builtin.apt:
+      pkg:
+      - docker
+      - docker-engine
+      - docker.io
+      - containerd
+      - runc
+      state: absent
+
+  - name: Run the equivalent of "apt-get update" as a separate step
+    ansible.builtin.apt:
+      update_cache: yes
+
+  - name: Install packages of apt-transport-https, ca-certificates and curl
+    ansible.builtin.apt:
+      pkg:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+
+  - name: Create a directory if /etc/apt/keyrings does not exist
+    ansible.builtin.file:
+      path: /etc/apt/keyrings
+      state: directory
+      # mode: '0755'
+
+  - name: Add Docker’s official GPG key
+    ansible.builtin.shell: |
+      curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+
+  - name: Set up the Docker repository
+    ansible.builtin.shell: |
+      echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list
+
+  - name: Run the equivalent of "apt-get update" as a separate step
+    ansible.builtin.apt:
+      update_cache: yes
+
+  - name: To install the latest version of containerd
+    ansible.builtin.apt:
+      pkg:
+      - containerd.io
+
+  - name: Create a directory if /etc/containerd does not exist
+    ansible.builtin.file:
+      path: /etc/containerd
+      state: directory
+
+  - name: Copy local config.toml to remote host
+    ansible.builtin.copy:
+      src: ./shared-data/config.toml
+      dest: /etc/containerd/config.toml
+
+  - name: Create a directory if /etc/containerd/certs.d/docker.io does not exist
+    ansible.builtin.file:
+      path: /etc/containerd/certs.d/docker.io
+      state: directory
+  
+  - name: Setup proxy for kubeadm
+    ansible.builtin.shell: |
+      systemctl set-environment HTTP_PROXY={{ proxy_env.http_proxy }}
+      systemctl set-environment HTTPS_PROXY={{ proxy_env.https_proxy }}
+      systemctl set-environment NO_PROXY={{ proxy_env.no_proxy }}
+
+  - name: Reload service containerd, in all cases
+    ansible.builtin.systemd:
+      name: containerd
+      state: restarted
       enabled: yes
 
-  - name: Configure node ip
-    copy:
-      dest: "/etc/sysconfig/kubelet"
-      content: |
-        [Service]
-        KUBELET_EXTRA_ARGS=--node-ip={{ node_ip }}
+  - name: Download the Google Cloud public signing key
+    ansible.builtin.shell: |
+      curl -fsSLo /usr/share/keyrings/kubernetes-archive-keyring.gpg https://packages.cloud.google.com/apt/doc/apt-key.gpg  
+
+  - name: Add the Kubernetes apt repository
+    ansible.builtin.shell: |
+      echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | tee /etc/apt/sources.list.d/kubernetes.list
+
+  - name: Run the equivalent of "apt-get update" as a separate step
+    ansible.builtin.apt:
+      update_cache: yes
+
+  - name: Install packages of kubelet, kubeadm and kubectl
+    ansible.builtin.apt:
+      pkg:
+      - kubelet={{ kubelet_version }}
+      - kubeadm={{ kubelet_version }}
+      - kubectl={{ kubelet_version }}
+      allow_change_held_packages: true
 
   - name: Restart kubelet
-    systemd:
+    ansible.builtin.systemd:
       name: kubelet
-      daemon_reload: yes
       state: restarted
+      enabled: yes
 
   - name: Copy the join command to server location
     copy: src=join-command dest=/tmp/join-command.sh mode=0777

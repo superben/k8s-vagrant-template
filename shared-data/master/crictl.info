@@ -1,0 +1,219 @@
+{
+  "status": {
+    "conditions": [
+      {
+        "type": "RuntimeReady",
+        "status": true,
+        "reason": "",
+        "message": ""
+      },
+      {
+        "type": "NetworkReady",
+        "status": true,
+        "reason": "",
+        "message": ""
+      }
+    ]
+  },
+  "cniconfig": {
+    "PluginDirs": [
+      "/opt/cni/bin"
+    ],
+    "PluginConfDir": "/etc/cni/net.d",
+    "PluginMaxConfNum": 1,
+    "Prefix": "eth",
+    "Networks": [
+      {
+        "Config": {
+          "Name": "cni-loopback",
+          "CNIVersion": "0.3.1",
+          "Plugins": [
+            {
+              "Network": {
+                "type": "loopback",
+                "ipam": {},
+                "dns": {}
+              },
+              "Source": "{\"type\":\"loopback\"}"
+            }
+          ],
+          "Source": "{\n\"cniVersion\": \"0.3.1\",\n\"name\": \"cni-loopback\",\n\"plugins\": [{\n  \"type\": \"loopback\"\n}]\n}"
+        },
+        "IFName": "lo"
+      },
+      {
+        "Config": {
+          "Name": "k8s-pod-network",
+          "CNIVersion": "0.3.1",
+          "Plugins": [
+            {
+              "Network": {
+                "type": "calico",
+                "ipam": {
+                  "type": "calico-ipam"
+                },
+                "dns": {}
+              },
+              "Source": "{\"container_settings\":{\"allow_ip_forwarding\":false},\"datastore_type\":\"kubernetes\",\"ipam\":{\"assign_ipv4\":\"true\",\"assign_ipv6\":\"false\",\"type\":\"calico-ipam\"},\"kubernetes\":{\"k8s_api_root\":\"https://10.96.0.1:443\",\"kubeconfig\":\"/etc/cni/net.d/calico-kubeconfig\"},\"log_file_path\":\"/var/log/calico/cni/cni.log\",\"log_level\":\"Info\",\"mtu\":0,\"nodename_file_optional\":false,\"policy\":{\"type\":\"k8s\"},\"type\":\"calico\"}"
+            },
+            {
+              "Network": {
+                "type": "bandwidth",
+                "capabilities": {
+                  "bandwidth": true
+                },
+                "ipam": {},
+                "dns": {}
+              },
+              "Source": "{\"capabilities\":{\"bandwidth\":true},\"type\":\"bandwidth\"}"
+            },
+            {
+              "Network": {
+                "type": "portmap",
+                "capabilities": {
+                  "portMappings": true
+                },
+                "ipam": {},
+                "dns": {}
+              },
+              "Source": "{\"capabilities\":{\"portMappings\":true},\"snat\":true,\"type\":\"portmap\"}"
+            }
+          ],
+          "Source": "{\n  \"name\": \"k8s-pod-network\",\n  \"cniVersion\": \"0.3.1\",\n  \"plugins\": [\n    {\n      \"type\": \"calico\",\n      \"datastore_type\": \"kubernetes\",\n      \"mtu\": 0,\n      \"nodename_file_optional\": false,\n      \"log_level\": \"Info\",\n      \"log_file_path\": \"/var/log/calico/cni/cni.log\",\n      \"ipam\": { \"type\": \"calico-ipam\", \"assign_ipv4\" : \"true\", \"assign_ipv6\" : \"false\"},\n      \"container_settings\": {\n          \"allow_ip_forwarding\": false\n      },\n      \"policy\": {\n          \"type\": \"k8s\"\n      },\n      \"kubernetes\": {\n          \"k8s_api_root\":\"https://10.96.0.1:443\",\n          \"kubeconfig\": \"/etc/cni/net.d/calico-kubeconfig\"\n      }\n    },\n    {\n      \"type\": \"bandwidth\",\n      \"capabilities\": {\"bandwidth\": true}\n    },\n    {\"type\": \"portmap\", \"snat\": true, \"capabilities\": {\"portMappings\": true}}\n  ]\n}"
+        },
+        "IFName": "eth0"
+      }
+    ]
+  },
+  "config": {
+    "containerd": {
+      "snapshotter": "overlayfs",
+      "defaultRuntimeName": "runc",
+      "defaultRuntime": {
+        "runtimeType": "",
+        "runtimePath": "",
+        "runtimeEngine": "",
+        "PodAnnotations": [],
+        "ContainerAnnotations": [],
+        "runtimeRoot": "",
+        "options": {},
+        "privileged_without_host_devices": false,
+        "baseRuntimeSpec": "",
+        "cniConfDir": "",
+        "cniMaxConfNum": 0
+      },
+      "untrustedWorkloadRuntime": {
+        "runtimeType": "",
+        "runtimePath": "",
+        "runtimeEngine": "",
+        "PodAnnotations": [],
+        "ContainerAnnotations": [],
+        "runtimeRoot": "",
+        "options": {},
+        "privileged_without_host_devices": false,
+        "baseRuntimeSpec": "",
+        "cniConfDir": "",
+        "cniMaxConfNum": 0
+      },
+      "runtimes": {
+        "runc": {
+          "runtimeType": "io.containerd.runc.v2",
+          "runtimePath": "",
+          "runtimeEngine": "",
+          "PodAnnotations": [],
+          "ContainerAnnotations": [],
+          "runtimeRoot": "",
+          "options": {
+            "BinaryName": "",
+            "CriuImagePath": "",
+            "CriuPath": "",
+            "CriuWorkPath": "",
+            "IoGid": 0,
+            "IoUid": 0,
+            "NoNewKeyring": false,
+            "NoPivotRoot": false,
+            "Root": "",
+            "ShimCgroup": "",
+            "SystemdCgroup": true
+          },
+          "privileged_without_host_devices": false,
+          "baseRuntimeSpec": "",
+          "cniConfDir": "",
+          "cniMaxConfNum": 0
+        }
+      },
+      "noPivot": false,
+      "disableSnapshotAnnotations": true,
+      "discardUnpackedLayers": false,
+      "ignoreRdtNotEnabledErrors": false
+    },
+    "cni": {
+      "binDir": "/opt/cni/bin",
+      "confDir": "/etc/cni/net.d",
+      "maxConfNum": 1,
+      "confTemplate": "",
+      "ipPref": ""
+    },
+    "registry": {
+      "configPath": "",
+      "mirrors": {
+        "10.200.10.1:5000": {
+          "endpoint": [
+            "http://10.200.10.1:5000"
+          ]
+        }
+      },
+      "configs": {
+        "10.200.10.1:5000": {
+          "auth": null,
+          "tls": {
+            "insecure_skip_verify": true,
+            "caFile": "",
+            "certFile": "",
+            "keyFile": ""
+          }
+        }
+      },
+      "auths": {},
+      "headers": {}
+    },
+    "imageDecryption": {
+      "keyModel": "node"
+    },
+    "disableTCPService": true,
+    "streamServerAddress": "127.0.0.1",
+    "streamServerPort": "0",
+    "streamIdleTimeout": "4h0m0s",
+    "enableSelinux": false,
+    "selinuxCategoryRange": 1024,
+    "sandboxImage": "registry.k8s.io/pause:3.6",
+    "statsCollectPeriod": 10,
+    "systemdCgroup": false,
+    "enableTLSStreaming": false,
+    "x509KeyPairStreaming": {
+      "tlsCertFile": "",
+      "tlsKeyFile": ""
+    },
+    "maxContainerLogSize": 16384,
+    "disableCgroup": false,
+    "disableApparmor": false,
+    "restrictOOMScoreAdj": false,
+    "maxConcurrentDownloads": 3,
+    "disableProcMount": false,
+    "unsetSeccompProfile": "",
+    "tolerateMissingHugetlbController": true,
+    "disableHugetlbController": true,
+    "device_ownership_from_security_context": false,
+    "ignoreImageDefinedVolumes": false,
+    "netnsMountsUnderStateDir": false,
+    "enableUnprivilegedPorts": false,
+    "enableUnprivilegedICMP": false,
+    "containerdRootDir": "/var/lib/containerd",
+    "containerdEndpoint": "/run/containerd/containerd.sock",
+    "rootDir": "/var/lib/containerd/io.containerd.grpc.v1.cri",
+    "stateDir": "/run/containerd/io.containerd.grpc.v1.cri"
+  },
+  "golang": "go1.18.8",
+  "lastCNILoadStatus": "OK",
+  "lastCNILoadStatus.default": "OK"
+}

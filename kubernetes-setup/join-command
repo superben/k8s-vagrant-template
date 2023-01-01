@@ -1,0 +1,1 @@
+kubeadm join 10.0.0.10:6443 --token k49k11.msvofraccmwbgrpw --discovery-token-ca-cert-hash sha256:f929ddb0086823e97c5c4b3979201ada29fbd6d883cd925ccda1ea465ce1279e 
